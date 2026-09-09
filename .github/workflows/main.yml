@@ -2,40 +2,43 @@ name: Build ISO
 on: [push]
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm xorriso grub-common grub-pc-bin mtools gcc-multilib
-      - name: Build OS
-        run: |
-          echo '[BITS 32]
+      - run: sudo apt-get update && sudo apt-get install -y nasm grub-pc-bin xorriso mtools
+      - run: |
+          cat > boot.asm <<'EOF'
+          [BITS 32]
           section.multiboot
-          align 4
           dd 0x1BADB002
-          dd 0x00
+          dd 0
           dd -0x1BADB002
           section.text
           global _start
           _start:
             mov esp, 0x90000
-            call kmain
+            mov esi, msg
+            mov edi, 0xB8000
+          loop1:
+            lodsb
+            test al, al
+            jz halt
+            stosb
+            mov byte [edi], 0x0E
+            inc edi
+            jmp loop1
+          halt:
             cli
-         .hang:
             hlt
-            jmp.hang' > boot.asm
-          echo 'void kmain(){ char *v= (char*)0xB8000; char *s="BroOS Running!"; int i=0; while(s[i]){ v[i*2]=s[i]; v[i*2+1]=0x0E; i++; } while(1){}}' > kernel.c
-          nasm -f elf32 boot.asm -o boot.o
-          gcc -m32 -ffreestanding -fno-stack-protector -c kernel.c -o kernel.o
-          ld -m elf_i386 -Ttext 0x100000 -o kernel.elf boot.o kernel.o --oformat elf32-i386
+            jmp halt
+          msg db 66, 114, 111, 79, 83, 32, 82, 117, 110, 110, 105, 110, 103, 33, 0
+          EOF
+          nasm -f elf32 boot.asm -o kernel.bin
           mkdir -p iso/boot/grub
-          cp kernel.elf iso/boot/kernel.bin
-          echo 'menuentry "BroOS"{ multiboot /boot/kernel.bin }' > iso/boot/grub/grub.cfg
+          cp kernel.bin iso/boot/
+          echo 'menuentry "BroOS" { multiboot /boot/kernel.bin }' > iso/boot/grub/grub.cfg
           grub-mkrescue -o BroOS.iso iso
-      - name: Upload
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: BroOS-ISO
           path: BroOS.iso
