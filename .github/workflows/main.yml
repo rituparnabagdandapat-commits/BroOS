@@ -5,9 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y nasm grub-pc-bin xorriso gcc-multilib
+      - run: sudo apt-get update && sudo apt-get install -y nasm grub-pc-bin xorriso mtools gcc-multilib
       - run: |
-          echo '[BITS 32]
+          cat > boot.asm <<'ENDASM'
+          [BITS 32]
           section.multiboot
           dd 0x1BADB002
           dd 0
@@ -15,20 +16,30 @@ jobs:
           section.text
           global _start
           _start:
-           mov esp, stack_top
-           call kmain
-           cli
-           hlt
+            mov esp, stack_top
+            call kmain
+            cli
+          hltloop:
+            hlt
+            jmp hltloop
           section.bss
-           resb 16384
-          stack_top:' > boot.asm
-          echo 'void kmain(){char*v=(char*)0xB8000;const char*s="BroOS Running!";for(int i=0;s[i];i++){v[i*2]=s[i];v[i*2+1]=0x0A;}while(1){}}' > kernel.c
+          resb 16384
+          stack_top:
+          ENDASM
+          cat > kernel.c <<'ENDC'
+          void kmain(){
+            char*v=(char*)0xB8000;
+            const char*s="BroOS Running! Made on PC!";
+            for(int i=0;s[i];i++){v[i*2]=s[i];v[i*2+1]=14;}
+            while(1){}
+          }
+          ENDC
           nasm -f elf32 boot.asm -o boot.o
-          gcc -m32 -ffreestanding -c kernel.c -o kernel.o
-          ld -m elf_i386 -Ttext 0x100000 -e _start boot.o kernel.o -o kernel.bin
+          gcc -m32 -ffreestanding -c kernel.c -o kernel.o -fno-pie
+          ld -m elf_i386 -Ttext 0x100000 --oformat elf32-i386 -e _start boot.o kernel.o -o kernel.bin
           mkdir -p iso/boot/grub
-          mv kernel.bin iso/boot/
-          echo -e 'set timeout=0\nmenuentry "BroOS"{\n multiboot /boot/kernel.bin\n}' > iso/boot/grub/grub.cfg
+          cp kernel.bin iso/boot/
+          printf 'set timeout=0\nmenuentry "BroOS" {\n multiboot /boot/kernel.bin\n boot\n}\n' > iso/boot/grub/grub.cfg
           grub-mkrescue -o BroOS.iso iso
       - uses: actions/upload-artifact@v4
         with:
